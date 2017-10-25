@@ -1,0 +1,17 @@
+
+function [scrambledIm] = PhaseScramble(im)
+
+phaseCoh = 0;
+
+imFourier = fft2(im);
+amp = abs(imFourier);
+phase = angle(imFourier);
+phase = phase*phaseCoh+randomPhase*(1-phaseCoh);
+scrambledIm = ifft2(amp.*exp(sqrt(-1)*(phase)));
+
+scrambledIm(:,:,layer) = reshape(iS,[imSize(1) imSize(2)]);
+scrambledIm = real(scrambledIm);
+
+scrambledIm = (scrambledIm-mean2(scrambledIm))/std2(scrambledIm)*32+128;
+
+end
