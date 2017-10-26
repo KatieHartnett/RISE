@@ -1,0 +1,395 @@
+% This is a template for a random image structure evolution (RISE)
+% experiment. Although philosophically inspired by Sadr and Sinha, this
+% algorithm will use the minimal phase interpolation technique of Ales,
+% Norcia et al so control for contrast transients. Please feel free to
+% alter the remainder of this text to give more specifics about your
+% experiment.
+
+% Started on 10/03/2017
+% Current 10/25/2017
+% <<Created by Michelle Green and edited by Katie Hartnett>>
+
+% Based on riseTemplate.m
+% Michelle Greene
+% October 2017
+
+% Basic housekeeping and setup
+clear Screen; % important for saving memory
+clear all; close all; % memory management and prevents current workspace
+% influencing current exp.
+rand('twister',sum(100*clock)); % resets random number generator
+
+% Get variable input from participant
+prompt = {'Subject number: ', 'Gender: ', 'Handedness', 'Age' };
+def={'1', 'xxx', 'xxx', 'xxx'};
+title = 'Input Variables';
+lineNo = 1;
+userinput = inputdlg(prompt, title, lineNo, def, 'on');
+
+% Interpret participant's entered input
+subNum = str2num(userinput{1,1});
+subGender = userinput{2,1};
+subHandedness = userinput{3,1};
+subAge = str2num(userinput{4,1}); % for string inputs
+% etc. continue below until all variables are initialized
+
+% Fill in hard coded experimental parameters that do not require
+% participant input
+presentationTime = .166;% in seconds
+blankTime = .167;% for 3 Hz stimulation, presentationTime and blankTime should
+% sum to 333 ms.
+numInSeries = 20;% number of RISE images to be presented per trial
+experimentalTrials = 50;
+catchTrials = 34; % how many experimental trials?
+catchTrialProp = 0.4;% proportion of catch trials (0.4 = 40%)
+
+% Define where stimuli are located
+rootDirectory = [filesep, 'Users', filesep, 'katiehartnett', filesep, 'Desktop', filesep, 'ProbablePerceptionExperiment'];
+
+cd ..
+
+sceneDirectory = [pwd, filesep,'Stimuli', filesep, 'expImages'];
+sceneListFull = dir(sceneDirectory); % creates struct of all images
+sceneList = sceneListFull(4:103);
+sceneList = sceneList';
+
+%im = sceneList(i);
+practiceDirectory = [pwd, filesep, 'Stimuli', filesep, 'practiceImage']; %fill in as above. Always good to have a separate ...
+% directory of images for practice. This experiment probably only needs 1.
+practiceimFull = dir(practiceDirectory);% THIS DOES NOT EXIST YET.
+practiceim = practiceimFull(4);
+
+cd([rootDirectory, filesep, 'Scripts']);
+%the line above moves us back into scripts to call openMainScreen
+
+
+% Set up display
+window = openMainScreen; % function at bottom. This will need to be saved
+% as its own file, or this template will need to be made into a function.
+stimRect = CenterRect([0 0 256 256]); % fill in image dimensions. Note that
+% the phase interpolation requires square images
+Screen('TextFont', window.onScreen, 'Helvetica');
+Screen('TextStyle', window.onScreen, 1);
+topPriorityLevel = MaxPriority(window.onScreen);
+AssertOpenGL;
+% This sets a PTB preference to skip some timing tests. A value
+% of 0 runs these tests, and a value of 1 inhibits them. This
+% should be set to 0 for actual experiments, since it can detect
+% timing problems.
+Screen('Preference', 'SkipSyncTests', 0);
+Screen('Preference', 'VisualDebugLevel', 3);
+
+% Define response keys
+KbName('UnifyKeyNames');
+responseKey = KbName('space');
+
+% Set up behavioral data file
+behavioralData = 'probableImagesBehavioralData.csv';
+if ~exist('probableImagesBehavioralData.csv', 'file')
+    fileID = fopen(behavioralData, 'a+');
+    fprintf(fileID,'%s \n',('Subject, Gender, Handedness, Age, Trial, imageName, imageCondition, isCatch, CohAtPress'))
+    % etc: fill in with all variables to save on each trial
+    fclose(fileID);
+end
+
+dataFormatString = '%d, %s, %s, %d, %d, %s, %d, %d, %d \n'; % change and append
+
+% Write the experimental instructions
+% instructionString = 'In this experiment, we will present 50 images ...
+%     of scences. We will show one image per trial and give you rest ...
+%     between trials. Your task is to press the spacebar whenever you ...
+%     belive that you have detected a scene.Not all trials contain scene ...
+%     images, so please refrain from pressing the spacebar if you ...
+%     believe you have not detected a scene. Please respond as quickly ...
+%     and accurately as possible. Press the space bar when you are ready to begin.';
+
+% Note: Up until this point, the participant has not seen anything except
+% for the gray screen that opens in the OpenMainScreen function. We need
+% to send our instructions to the main screen.
+DrawFormattedText(window.onScreen, instructionString, 'center', 'center', [0 0 0], 48);
+Screen('Flip', window.onScreen,[],1); % instructions on screen now
+FlushEvents('KeyDown');
+GetChar; % upon key press, instructions go away
+Screen('FillRect',window.onScreen,window.bcolor);
+Screen('Flip', window.onScreen); % back to gray screen
+
+message = ' To commence the practice trial, please press the spacebar';
+
+DrawFormattedText(window.onScreen, message, 'center', 'center', [0 0 0], 70);
+Screen('Flip', window.onScreen);
+FlushEvents('KeyDown');
+GetChar;
+WaitSecs(.3);
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Main experimental loop
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+HideCursor;
+Priority(topPriorityLevel); % to ensure the most accurate timing
+%ListenChar(2);    %  suppress output of keypresses in the command window
+% Note: it's good to comment out the previous line when debugging because
+% if your program crashes, you will have a "dead" keyboard that you'll need
+% to CTRL-C and SCA out of.
+clearTextureFlag = 0; % memory management: do we have to clear the background texture?yes because there is finite memory
+
+% start with a practice trial
+for practice = 1:-1:0 % boolean toggle
+    trial = 1;
+    if practice==1
+        blockMessage = 'practice ';
+        nTrials = length(practiceList); %1
+        stimDirectory = practiceDirectory;
+        thisList = practiceList;
+        presTime = presentationTime;
+    else
+        blockMessage = 'experimental ';
+        nTrials = experimentalTrials;
+        stimDirectory = sceneDirectory;
+        thisList = sceneList;
+        presTime = presentationTime;
+    end
+    
+    
+    % screen goes blank
+    Screen('FillRect',window.onScreen,window.bcolor);
+    Screen('Flip',window.onScreen);
+    
+    % ready, set, go!
+    nTrialString = num2str(nTrials); %nTrials is the length of the list of
+    message = [' Press spacebar to begin ', nTrialString, ' ', blockMessage, 'trials'];
+    DrawFormattedText(window.onScreen, message, 'center', 'center', [0 0 0], 70);
+    Screen('Flip', window.onScreen);
+    FlushEvents('KeyDown'); %forgets past key presses
+    GetChar;%collects keyboard input while script runs
+    WaitSecs(.3);
+    
+    % randomize the images
+    % Note: this assumes that all conditions within a directory are
+    % balanced (for example, if task is categorization that there are equal
+    % numbers of images in each category). If this is not the case, come
+    % talk to me about how to balance the experiment.
+    
+    
+    while experimentalTrials<=50
+        
+        if rand(1)<0.4 %this signifies a catch trial
+            %make 3D matrix of the phase scrambles
+            catchImInd = round(rand(1)*10)+1;
+            catchIm = sceneList(catchImInd);
+            im = catchIm;
+            
+            for i = 1:20
+                scrambledImMat(:, :, i) = PhaseScramble(im);
+                
+                trialIm = trialSequence(:,:,image);
+                imageTexture = Screen('MakeTexture', window.onScreen, trialIm);
+                
+                for repeat = 1:3 % repeat the same level 3x
+                    Screen('DrawTexture',window.onScreen,imageTexture,[],stimRect);
+                    [onTime]=Screen('Flip',window.onScreen);
+                    WaitSecs(presentationTime);
+                    Screen('FillRect',window.onScreen,window.bcolor);
+                    [offTime] = Screen('Flip',window.onScreen);
+                    WaitSecs(blankTime)
+                    % check to see if participant made a response
+                    FlushEvents('keyDown');
+                    [keyIsDown,secs,keyCode]=KbCheck;
+                    responseImage = image; % denotes which step was recognizable
+                end
+                
+            end
+            %i need code to generate 20 phase randomized images.
+            %and run them through the catch trial
+            
+        else %experimental trial! choose image, process it for minPhaseInterp, RISE
+            
+            %this part creates the matrix that I use to come up with the trial order of
+            %the stimuli.
+            stimNum = (001:050)';
+            stimNum = Shuffle(stimNum);
+            binVector = [ones(1,25) zeros(1,25)];
+            binVector = (Shuffle(binVector))';
+            imChoice = [stimNum binVector];
+            
+            % this list will be popualted with the components of the split image names.
+            bigSceneList = zeros(100, 2);
+            
+            %will go through sceneList 1 by 1 to split the image name.
+            for i = 1:length(sceneList)
+                thisName = sceneList(i).name;
+                splitImage = split('--', sceneList(i).name);
+                
+                bigSceneList(i,1) = str2num(splitImage{1});
+                
+                if splitImage{2} == 'A'
+                    bigSceneList(i,2) = 1;
+                else
+                    bigSceneList(i,2) = 0;
+                end
+                
+            end
+            
+            %x will be the location in bigSceneList where the image number matches
+            %the pair number indicated at the ith row of imChoice
+            x = intersect(bigSceneList(:,1) == imChoice(trial,1) , bigSceneList(:,2) == imChoice(trial,2));
+            trialIm = double(imread(['ProbablePerceptionExperiment', filesep, 'Stimuli', filesep, 'expImages', filesep, 'sceneList(x).name' ])); %this line is bad! sos!
+            imname = sceneList(x).name;
+            trialIm = PhaseScramble(trialIm); %this line prepares the image for minphaseinterp
+            
+            
+            % create the RISE sequence
+            % minPhaseInterp needs a start point and an end point. The start
+            % point is a fully phase-randomized version of the image. Create a
+            % function that will do this and this will be your start. thisImage
+            % will be your end point, and you will also give a sequence vector
+            % indicating your step sizes.
+            
+            imFinal= trialIm;
+            imStart=randn(size(imFinal));
+            imSeq=minPhaseInterp(imStart,imFinal,linspace(0,.05,1));
+            
+            minPhaseInterp(imStart, imFinal, [0:0.05:1]) %minPhaseInterp makes the matrix for me!
+            
+            for i = 1:20
+                scrambledImMat(:, :, i) = PhaseScramble(im);
+                
+                trialIm = trialSequence(:,:,image);
+                imageTexture = Screen('MakeTexture', window.onScreen, trialIm);
+                
+                for repeat = 1:3 % repeat the same level 3x
+                    Screen('DrawTexture',window.onScreen,imageTexture,[],stimRect);
+                    [onTime]=Screen('Flip',window.onScreen);
+                    WaitSecs(presentationTime);
+                    Screen('FillRect',window.onScreen,window.bcolor);
+                    [offTime] = Screen('Flip',window.onScreen);
+                    WaitSecs(blankTime)
+                    % check to see if participant made a response
+                    FlushEvents('keyDown');
+                    [keyIsDown,secs,keyCode]=KbCheck;
+                    responseImage = image; % denotes which step was recognizable
+                end
+                
+            end
+            
+            experimentalTrials = experimentalTrials-1;
+        end %end of experimental else
+        
+        toMoveOnString = 'This trial is finished. Please rest your eyes and press the spacebar when you are ready for the next trial';
+        
+        DrawFormattedText(window.onScreen, toMoveOnString, 'center', 'center', [0 0 0], 48);
+        Screen('Flip', window.onScreen,[],1); % instructions on screen now
+        FlushEvents('KeyDown');
+        GetChar; % upon key press, instructions go away
+        Screen('FillRect',window.onScreen,window.bcolor);
+        Screen('Flip', window.onScreen); % back to gray screen
+        
+        message = ' To commence the next trial, please press the spacebar';
+        
+        DrawFormattedText(window.onScreen, message, 'center', 'center', [0 0 0], 70);
+        Screen('Flip', window.onScreen);
+        FlushEvents('KeyDown');
+        GetChar;
+        WaitSecs(.3);
+        
+        
+    end
+    
+end
+
+% screen goes blank
+Screen('FillRect',window.onScreen,window.bcolor);
+Screen('Flip',window.onScreen);
+
+% save the data on each trial
+dataFile = fopen(dataFileName, 'a');
+fprintf(dataFile, dataFormatString, xxx, xxx, xxx, xxx,...
+    xxx, xxx, totalxxxTime, xxx, xxx); % fill in based on above
+fclose('all');
+
+if trialType
+    numTrials = numTrials - 1; % counting down the number of real trials
+end
+
+DrawFormattedText(window.onScreen, 'Thanks for participating!', 'center', 'center', [0 0 0]);
+Screen('Flip', window.onScreen);
+WaitSecs(2);
+Screen('CloseAll');
+
+% Close it out
+Screen('CloseAll');
+
+
+
+
+% while nTrials>0 % counts down from 1 for practice and from 50 for exp.
+%     trial = trial + 1;
+%     if rand(1)<catchTrialProp
+%         trialType = 0; % this is a catch trial
+%     else
+%         trialType = 1;
+%     end
+%
+%     if trialType==1
+%
+%
+%         % load the appropriate image
+%         %already loaded above. if that doesn't work, try loading here.
+%
+%         % process the image
+%         trialIm = CenterRect([0 0 256 256]);% here make square and equal to size in line 53
+%         trialIm = mean(im,3);% make the image grayscale
+%     else % these are the catch trials
+%         trialSequence(:,:,20) = imScrambled; % call phasescramble. Note: num is number of steps
+%     end
+% end
+
+
+
+
+
+
+
+%%%%%%%%%%%%%%%%%%%%%
+% Trial sequence
+%%%%%%%%%%%%%%%%%%%%%
+response = 9000; % default value until real response given
+
+% show a fixation point for 200 msec
+Screen('FillRect',window.onScreen,0,[window.centerX-5 window.centerY-5 window.centerX+5 window.centerY+5]); % fixation pt
+Screen('Flip', window.onScreen,[],1);
+WaitSecs(.2); % deterministic
+
+% screen goes blank
+Screen('FillRect',window.onScreen,window.bcolor);
+Screen('Flip',window.onScreen);
+
+% first, clear any existing textures to save memory
+if clearTextureFlag
+    Screen('Close',imageTexture);
+    Screen('Close',maskTexture);
+else
+    clearTextureFlag = 1;
+end
+
+% % loop through all images in the RISE sequence
+% for image = 1:size(trialSequence,3)
+%     trialIm = trialSequence(:,:,image);
+%     imageTexture = Screen('MakeTexture', window.onScreen, trialIm);
+%     for repeat = 1:3 % repeat the same level 3x
+%         Screen('DrawTexture',window.onScreen,imageTexture,[],stimRect);
+%         [onTime]=Screen('Flip',window.onScreen);
+%         WaitSecs(presentationTime);
+%         Screen('FillRect',window.onScreen,window.bcolor);
+%         [offTime] = Screen('Flip',window.onScreen);
+%         WaitSecs(blankTime)
+%         % check to see if participant made a response
+%         FlushEvents('keyDown');
+%         [keyIsDown,secs,keyCode]=KbCheck;
+%         responseImage = image; % denotes which step was recognizable
+%     end
+% end
+
+
+
+
